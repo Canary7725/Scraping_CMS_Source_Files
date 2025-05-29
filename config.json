@@ -1,0 +1,9 @@
+{
+    "url":"https://www.cms.gov/medicare/health-drug-plans/medicare-advantage-application",
+    "file_match_pattern": "<a href=\\\"(/files/document/2024-hsd-reference-file[^\\\"]*\\.xlsx)\\\">[^<]*<\\/a>",
+    "register":"HSD_2024",
+    "sheets": {
+    "time_distance": "Provider Time & Distance",
+    "minimums": "Minimum Provider #s"
+    }
+}
