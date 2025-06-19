@@ -5,7 +5,7 @@ from urllib.parse import urljoin
 import urllib.request
 import re
 import pandas as pd
-from process_time_and_distance_sheet import provider_time_distance_df
+from process_time_and_distance_sheet import load_and_transform_provider_time_distance
 from process_minimum_provider import get_minimum_provider_sheet_df,get_max_time_and_distance
 
 def load_config():
@@ -43,7 +43,7 @@ def main():
     config=load_config()
     file_name,file_url=download_file(config['url'])
     try:
-        time_distance_df=provider_time_distance_df(file_name,config['sheets']['time_distance'],file_url)
+        time_distance_df=load_and_transform_provider_time_distance(file_name,config['sheets']['time_distance'],file_url)
         minimum_provider_df=get_max_time_and_distance(time_distance_df,file_name,config['sheets']['minimums'])
     except Exception as e:
         print(f'Error{e}')

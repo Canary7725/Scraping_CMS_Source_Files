@@ -1,134 +1,83 @@
-from email.utils import parsedate_to_datetime
-import json
-import re
-import urllib.request
 import pandas as pd
-from datetime import datetime
-import urllib
+import re
+from email.utils import parsedate_to_datetime
+import urllib.request
 
-def get_file_metadata(file_url):
-    requests=urllib.request.Request(file_url,method='HEAD')
-    with urllib.request.urlopen(requests) as response:
-        headers=response.info()
-        date=parsedate_to_datetime(headers.get("Last-Modified"))
-        last_modified=date.strftime("%Y-%m-%d")
 
-        content_disposition=headers.get("Content-Disposition")
+def extract_file_metadata(file_url):
+    request = urllib.request.Request(file_url, method='HEAD')
+    with urllib.request.urlopen(request) as response:
+        headers = response.info()
+        last_modified = parsedate_to_datetime(headers.get("Last-Modified")).strftime("%Y-%m-%d")
+
+        content_disposition = headers.get("Content-Disposition", "")
         match = re.search(r'filename="?([^"]+)"?', content_disposition)
-        filename=match.group(1)
-        return filename,last_modified
+        filename = match.group(1) if match else file_url.split('/')[-1].split('?')[0]
+
+    return filename, last_modified
 
 
-def provider_time_distance_df(file_path,sheet_name,file_url):
-    """
-    Load the Provider Time & Distance sheet and transform to long format
-    with specialty and specialty_code as separate columns
-    """
-    
-    df_wide = load_wide_format(file_path, sheet_name)
-    
-    df_long = transform_to_long_format(df_wide,file_url)
-    
-    return df_long
+def load_and_transform_provider_time_distance(file_path, sheet_name, file_url):
+    df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
 
-def load_wide_format(file_path, sheet_name=None):
-    """
-    Load the data in wide format first
-    """
-    df_full = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
-    
-    header_row_1 = df_full.iloc[1].fillna('')  # Row with specialty names
-    header_row_2 = df_full.iloc[2].fillna('')  # Row with specialty codes  
-    header_row_3 = df_full.iloc[3].fillna('')  # Row with Time/Distance
-    
-    new_columns = []
-    specialty_info = {} 
-    
+    header_1 = df.iloc[1].fillna('').astype(str).str.strip()  # Specialty Name
+    header_2 = df.iloc[2].fillna('').astype(str).str.strip()  # Specialty Code
+    header_3 = df.iloc[3].fillna('').astype(str).str.strip().str.lower()  # time/distance
+
     base_columns = ['county', 'st', 'county_state', 'ssa_code', 'county_designation']
-    
-    for i in range(len(df_full.columns)):
+    column_map = {}
+    specialty_info = {}
+
+    for i in range(df.shape[1]):
         if i < 5:
-            new_columns.append(base_columns[i] if i < len(base_columns) else f'col_{i}')
+            column_map[i] = base_columns[i]
         else:
-            specialty_name = str(header_row_1.iloc[i]).strip()
-            specialty_code = str(header_row_2.iloc[i]).strip()
-            time_distance = str(header_row_3.iloc[i]).strip().lower()            
-            if specialty_code and specialty_code != 'nan' and specialty_code != '':
-                if specialty_code not in specialty_info:
-                    specialty_info[specialty_code] = specialty_name
-                
-                if 'time' in time_distance:
-                    new_columns.append(f'{specialty_code}_time')
-                elif 'distance' in time_distance:
-                    new_columns.append(f'{specialty_code}_distance')
+            code = header_2[i]
+            label = header_1[i]
+            measure = header_3[i]
 
+            if code and code.lower() != 'nan':
+                specialty_info[code] = label
+                if 'time' in measure:
+                    column_map[i] = f'{code}_time'
+                elif 'distance' in measure:
+                    column_map[i] = f'{code}_distance'
             else:
-                if i > 5 and len(new_columns) > 0:
-                    last_col = new_columns[-1]
-                    if '_time' in last_col:
-                        specialty_code = last_col.replace('_time', '')
-                        new_columns.append(f'{specialty_code}_distance')
+                if column_map.get(i - 1, '').endswith('_time'):
+                    prev_code = column_map[i - 1].replace('_time', '')
+                    column_map[i] = f'{prev_code}_distance'
 
-    df_data = df_full.iloc[4:].copy()
-    df_data.columns = new_columns[:len(df_data.columns)]
-    df_data = df_data.reset_index(drop=True)
-    
-    df_data = df_data.dropna(axis=1, how='all')
-    
-    
-    return df_data, specialty_info
+    df_data = df.iloc[4:].copy()
+    df_data.columns = [column_map.get(i, f'col_{i}') for i in range(df.shape[1])]
+    df_data.dropna(axis=1, how='all', inplace=True)
+    df_data.reset_index(drop=True, inplace=True)
 
+    value_vars = [col for col in df_data.columns if col not in base_columns]
+    df_long = df_data.melt(id_vars=base_columns, value_vars=value_vars,
+                           var_name='specialty_measure', value_name='value')
 
-def transform_to_long_format(data_tuple,file_url):
-    """
-    Transform wide format to long format with specialty and specialty_code columns,
-    applying schema and setting metadata fields.
-    """
-    df_wide, specialty_info = data_tuple
+    df_long[['specialty_cd', 'measure']] = df_long['specialty_measure'].str.extract(r'([A-Za-z0-9]+)_?(time|distance)?')
+    df_long['specialty_cd'] = df_long['specialty_cd'].str.zfill(3)
 
-    base_cols = ['county', 'st', 'county_state', 'ssa_code', 'county_designation']
+    df_pivot = df_long.pivot_table(
+        index=base_columns + ['specialty_cd'],
+        columns='measure',
+        values='value',
+        aggfunc='first'
+    ).reset_index()
 
-    filename,last_modified=get_file_metadata(file_url)
+    df_pivot.columns.name = None
+    df_pivot['time'] = df_pivot.get('time')
+    df_pivot['distance'] = df_pivot.get('distance')
 
-    specialty_cols = [col for col in df_wide.columns if col not in base_cols]
+    df_pivot['specialty'] = df_pivot['specialty_cd'].map(
+        lambda cd: str(specialty_info.get(cd, cd)).replace('(see Notes)', '').strip()
+    )
 
-    specialty_codes = set()
-    for col in specialty_cols:
-        if '_time' in col:
-            specialty_codes.add(col.replace('_time', ''))
-        elif '_distance' in col:
-            specialty_codes.add(col.replace('_distance', ''))
-        else:
-            specialty_codes.add(col)
-
-    specialty_codes = list(specialty_codes)
-
-    long_data = []
-    for _, row in df_wide.iterrows():
-        base_data = {col: row[col] for col in base_cols if col in df_wide.columns}
-
-        for spec_code in specialty_codes:
-            row_data = base_data.copy()
-
-
-            specialty_clean = specialty_info.get(spec_code, spec_code)
-            specialty_clean = str(specialty_clean).replace('(see notes)', '').strip()
-            row_data['specialty'] = specialty_clean
-
-            time_col = f'{spec_code}_time'
-            distance_col = f'{spec_code}_distance'
-            row_data['time'] = row[time_col] if time_col in df_wide.columns else None
-            row_data['distance'] = row[distance_col] if distance_col in df_wide.columns else None
-            
-            row_data['specialty_cd'] = str(spec_code).zfill(3)
-
-            # Additional metadata
-            row_data['file_set'] = filename
-            row_data['file_path'] = file_url
-            row_data['data_source'] = 'CMS Medicare Advantage Applications'
-            row_data['file_date'] = last_modified
-            long_data.append(row_data)
-
-    df_long = pd.DataFrame(long_data)
-    return df_long
-
+    filename, last_modified = extract_file_metadata(file_url)
+    df_pivot['file_set'] = filename
+    df_pivot['file_path'] = file_url
+    df_pivot['file_date'] = last_modified
+    df_pivot['data_source'] = 'CMS Medicare Advantage Applications'
+    return df_pivot
+  
