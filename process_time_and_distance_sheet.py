@@ -40,8 +40,6 @@ def load_and_transform_provider_time_distance(file_path, sheet_name, file_url):
                 specialty_info[code] = label
                 if 'time' in measure:
                     column_map[i] = f'{code}_time'
-                elif 'distance' in measure:
-                    column_map[i] = f'{code}_distance'
             else:
                 if column_map.get(i - 1, '').endswith('_time'):
                     prev_code = column_map[i - 1].replace('_time', '')
@@ -52,8 +50,7 @@ def load_and_transform_provider_time_distance(file_path, sheet_name, file_url):
     df_data.dropna(axis=1, how='all', inplace=True)
     df_data.reset_index(drop=True, inplace=True)
 
-    value_vars = [col for col in df_data.columns if col not in base_columns]
-    df_long = df_data.melt(id_vars=base_columns, value_vars=value_vars,
+    df_long = df_data.melt(id_vars=base_columns,
                            var_name='specialty_measure', value_name='value')
 
     df_long[['specialty_cd', 'measure']] = df_long['specialty_measure'].str.extract(r'([A-Za-z0-9]+)_?(time|distance)?')
@@ -69,7 +66,6 @@ def load_and_transform_provider_time_distance(file_path, sheet_name, file_url):
     df_pivot.columns.name = None
     df_pivot['time'] = df_pivot.get('time')
     df_pivot['distance'] = df_pivot.get('distance')
-
     df_pivot['specialty'] = df_pivot['specialty_cd'].map(
         lambda cd: str(specialty_info.get(cd, cd)).replace('(see Notes)', '').strip()
     )
