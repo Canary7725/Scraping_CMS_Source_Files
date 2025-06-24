@@ -1,11 +1,9 @@
-from email.utils import parsedate_to_datetime
 import json
 import logging
 from urllib.parse import urljoin
 import urllib.request
 import re
-import pandas as pd
-from process_time_and_distance_sheet import provider_time_distance_df
+from process_time_and_distance_sheet import load_and_transform_provider_time_distance
 from process_minimum_provider import get_minimum_provider_sheet_df,get_max_time_and_distance
 
 def load_config():
@@ -43,12 +41,17 @@ def main():
     config=load_config()
     file_name,file_url=download_file(config['url'])
     try:
-        time_distance_df=provider_time_distance_df(file_name,config['sheets']['time_distance'],file_url)
-        minimum_provider_df=get_max_time_and_distance(time_distance_df,file_name,config['sheets']['minimums'])
+        time_distance_df=load_and_transform_provider_time_distance(file_name,config['sheets']['time_distance'],file_url)
+        time_distance_df.to_excel('Time and Distance.xlsx',sheet_name='Provider Time and Distance',index=False)
+        print("Minimum Provider Time and Distance sheet created sucessfully")
     except Exception as e:
         print(f'Error{e}')
-    time_distance_df.to_excel('Time and Distance.xlsx',sheet_name='Provider Time and Distance',index=False)
-    minimum_provider_df.to_excel('Minimums.xlsx',sheet_name='Minimum Provider',index=False)
+    try:
+        minimum_provider_df=get_max_time_and_distance(time_distance_df,file_name,config['sheets']['minimums'])
+        minimum_provider_df.to_excel('Minimums.xlsx',sheet_name='Minimum Provider',index=False)
+        print("Minimum Provider Count Sheet created sucessfully")
 
+    except Exception as e:
+        print(f'Error:{e}')
 if __name__=="__main__":
     main()
